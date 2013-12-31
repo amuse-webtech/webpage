@@ -1,15 +1,13 @@
 var http = require('http');
-//var path = require('path');
+var path = require('path');
 var url = require('url');
+var fs = require('fs');
 
-var pages = [
-    {route: "/", output: "TopPage"},
-    {route: "/about", output: "About"},
-    {route: "/function", output: function(){
-            return "This is " + this.route;
-        }
-    }
-];
+var mimeTypes = {
+    '.js': 'text/javascipt',
+    '.html': 'text/html',
+    '.css': 'text/css'
+};
 
 http.createServer(function (request, response) {
     var u = url.parse(decodeURI(request.url), true);
@@ -17,15 +15,27 @@ http.createServer(function (request, response) {
     var query = u.query;
     console.log(pathname);
     console.log(query);
-    pages.forEach(function(page) {
-        if (page.route === pathname) {
-            response.writeHead(200, {'Content-Type': 'text/html'});
-            response.end(typeof page.output === 'function' ? 
-                page.output() : page.output);
+    var f = 'contents' + (pathname === '/' ? '/index.html' : pathname);
+    console.log(f);
+    fs.exists(f, function (exists) {
+        if (exists) {
+            fs.readFile(f, function (err, data) {
+                // ファイルの読み込みに失敗した場合
+                if (err) {
+                    response.writeHead(500);
+                    response.end('Internal Server Error');
+                    return;
+                }
+                // 拡張子に応じてHeaderを記述
+                var headers = {'Content-Type': mimeTypes[path.extname(f)]};
+                console.log(headers);
+                response.writeHead(200, headers);
+                response.end(data);
+            });
+        } else {
+            response.writeHead(404);
+            response.end('ページが見つかりません！');
         }
+        return;
     });
-    if (!response.finished) {
-        response.writeHead(404);
-        response.end('ページが見つかりません！');
-    }
 }).listen(3080);
