@@ -12,27 +12,6 @@ var mimeTypes = {
 
 // コンテンツキャッシュ
 var cache = {};
-var cacheAndDeliver = function(file, callback){
-    fs.stat(file, function(err, stats) {
-        var ctime = Date.parse(stats.ctime);
-        var isUpdated = cache[file] && (ctime > cache[file].timestamp);
-        if (cache[file] && !isUpdated) { // キャッシュから読み込み
-            console.log("read from cache:" + file);
-            callback(null, cache[file].contents);
-            return;
-        } else { // FileからRead
-            fs.readFile(file, function(err, data) {
-                if (!err) {
-                    cache[file] = {
-                        contents: data,
-                        timestamp: Date.now()
-                    };
-                }
-                callback(err, data);
-            });
-        }
-    });
-};
 
 http.createServer(function (request, response) {
     var u = url.parse(decodeURI(request.url), true);
@@ -44,18 +23,39 @@ http.createServer(function (request, response) {
     console.log(file);
     fs.exists(file, function (exists) {
         if (exists) {
-            cacheAndDeliver(file, function (err, data) {
-                // ファイルの読み込みに失敗した場合
-                if (err) {
-                    response.writeHead(500);
-                    response.end('Internal Server Error');
-                    return;
-                }
-                // 拡張子に応じてHeaderを記述
+            fs.stat(file, function(err, stats) {
+                var ctime = Date.parse(stats.ctime);
+                var isUpdated = (cache[file]) && (ctime > cache[file].timestamp);
+            
                 var headers = {'Content-Type': mimeTypes[path.extname(file)]};
                 console.log(headers);
-                response.writeHead(200, headers);
-                response.end(data);
+                if (cache[file] && !isUpdated) {
+                    console.log('Read from cache : ' + file);
+                    response.writeHead(200, headers);
+                    response.end(cache[file].content);
+                    return;
+                }
+    
+                // ストリーミングでファイルを配信する
+                var s = fs.createReadStream(file).once('open', function (){
+                    response.writeHead(200, headers);
+                    this.pipe(response);
+                }).once('error', function (e){
+                    console.log(e);
+                    response.writeHead(500);
+                    response.end('Internal Server Error');
+                });
+                
+                // readStreamの内容をキャッシュにも書き込む
+                var bufferOffset = 0;
+                cache[file] = {
+                    content: new Buffer(stats.size),
+                    timestamp: Date.now()
+                };
+                s.on('data', function (data) {
+                    data.copy(cache[file].content, bufferOffset);
+                    bufferOffset += data.length;
+                });
             });
         } else {
             response.writeHead(404);
